@@ -45,7 +45,7 @@ export async function uploadPublicImage(
     const res = await fetch(`${e.SUPABASE_URL}/storage/v1/object/${bucket}/${objectPath}`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${e.SUPABASE_SERVICE_ROLE_KEY}`,
+        ...supabaseAuth(e.SUPABASE_SERVICE_ROLE_KEY),
         "Content-Type": file.type,
         "x-upsert": "false",
         "cache-control": "public, max-age=31536000, immutable",
@@ -68,6 +68,11 @@ export async function uploadPublicImage(
     data: { bucket: result.bucket, path: result.path, mimeType: file.type, sizeBytes: file.size, isPublic: true, uploadedBy: ctx.user.id },
   });
   return result;
+}
+
+/** Headers for Supabase Storage: works with legacy service_role JWTs and the newer sb_secret_ keys (which go in `apikey`). */
+function supabaseAuth(key: string): Record<string, string> {
+  return key.startsWith("sb_") ? { apikey: key } : { apikey: key, Authorization: `Bearer ${key}` };
 }
 
 function matchesMagicBytes(b: Buffer, type: string): boolean {
@@ -108,7 +113,7 @@ export async function uploadPrivateDocument(
     bucket = e.SUPABASE_PRIVATE_BUCKET;
     const res = await fetch(`${e.SUPABASE_URL}/storage/v1/object/${bucket}/${objectPath}`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${e.SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": file.type, "x-upsert": "false" },
+      headers: { ...supabaseAuth(e.SUPABASE_SERVICE_ROLE_KEY), "Content-Type": file.type, "x-upsert": "false" },
       body: bytes,
     });
     if (!res.ok) throw new AppError("INTERNAL", "Upload failed. Please try again.");
@@ -141,7 +146,7 @@ export async function readPrivateDocument(fileId: string): Promise<{ bytes: Buff
   }
   if (!e.SUPABASE_URL || !e.SUPABASE_SERVICE_ROLE_KEY) return null;
   const res = await fetch(`${e.SUPABASE_URL}/storage/v1/object/authenticated/${f.bucket}/${f.path}`, {
-    headers: { Authorization: `Bearer ${e.SUPABASE_SERVICE_ROLE_KEY}` },
+    headers: { ...supabaseAuth(e.SUPABASE_SERVICE_ROLE_KEY) },
     cache: "no-store",
   });
   if (!res.ok) return null;
