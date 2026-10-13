@@ -68,8 +68,12 @@ export default async function DashboardPage() {
       label: "Sales today",
       value: formatMoney(k.net),
       hint:
-        k.changeVsLastWeek === null ? "No sales on this day last week" : `${k.changeVsLastWeek >= 0 ? "+" : ""}${k.changeVsLastWeek}% vs same day last week`,
-      trend: k.changeVsLastWeek,
+        k.orders === 0
+          ? "No sales yet today"
+          : k.changeVsLastWeek === null
+            ? "No sales on this day last week"
+            : `${k.changeVsLastWeek >= 0 ? "+" : ""}${k.changeVsLastWeek}% vs same day last week`,
+      trend: k.orders === 0 ? null : k.changeVsLastWeek,
       href: "/admin/reports/sales",
       testId: "kpi-sales",
     },

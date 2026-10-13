@@ -34,7 +34,7 @@ Keep every password, key and the **backup passphrase** in a password manager the
    | optional | `RESEND_API_KEY`, `EMAIL_FROM`, `SMS_*`, `WHATSAPP_*` (see `.env.example`) |
 
    Do **not** set `SEED_DEMO_USERS` or `SEED_DEMO_DATA` in production.
-3. Deploy. The build (`npm run vercel-build`) applies migrations automatically for production deployments only. On the Vercel **Hobby** plan, first change the schedule in `vercel.json` to once a day (`"0 22 * * *"`), because Hobby rejects more frequent cron jobs; alerts still arrive through staff screens.
+3. Deploy. The build (`npm run vercel-build`) applies migrations automatically for production deployments only. `vercel.json` runs the server in Mumbai (`bom1`, next to the database) and the scheduled job once a day, which the free Hobby plan allows; alerts still arrive within seconds through staff screens. On Pro you can change the schedule to every 5 minutes (`"*/5 * * * *"`).
 4. Seed the base data once from your computer, pointing at production (put these in a temporary `.env.production.local`, not in Vercel):
    `DIRECT_URL`, `DATABASE_URL` = the direct URL, `SEED_OWNER_EMAIL`, `SEED_OWNER_PASSWORD`, `SEED_OWNER_NAME`, `SEED_DEMO_USERS=false`, `SEED_DEMO_DATA=false`, then
    `npx dotenv -e .env.production.local -- npm run db:seed`

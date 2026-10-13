@@ -105,8 +105,8 @@ export async function seedDemoPeople(db: PrismaClient, branchId: string, log: (m
   const cats = new Map((await db.expenseCategory.findMany()).map((c) => [c.name, c.id]));
   const list: [string, number, string, string, number][] = [
     ["Rent", 180000, "Shop rent", "BANK_TRANSFER", -1],
-    ["Electricity", 64500, "LESCO bill", "BANK_TRANSFER", -1],
-    ["Gas", 18200, "SNGPL bill", "BANK_TRANSFER", -1],
+    ["Electricity", 64500, "Electricity bill", "BANK_TRANSFER", -1],
+    ["Gas", 18200, "Gas bill", "BANK_TRANSFER", -1],
     ["Internet & phone", 4500, "Fibre internet", "BANK_TRANSFER", -1],
     ["Packaging", 22000, "Burger boxes and bags", "CASH_OTHER", -1],
     ["Repairs & maintenance", 7500, "Fryer thermostat repair", "CASH_OTHER", -1],

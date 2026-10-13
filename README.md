@@ -119,5 +119,5 @@ Vercel (app and scheduled jobs) + Supabase (PostgreSQL and file storage). Step-b
 
 - `npm run vercel-build` applies migrations for production deployments only, then builds.
 - The app refuses to start in production with missing or example secrets, or with local file storage on Vercel.
-- `vercel.json` runs `/api/cron/jobs` every 5 minutes (alerts, event dispatch, points expiry); it is protected by `CRON_SECRET`.
+- `vercel.json` runs functions in Mumbai and `/api/cron/jobs` daily (every 5 minutes is possible on Pro); it is protected by `CRON_SECRET`.
 - `.github/workflows/backup.yml` makes a nightly encrypted backup and test-restores it.

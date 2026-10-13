@@ -52,3 +52,6 @@ next-env.d.ts
 /tests/e2e/.auth
 # prisma generated client
 /src/generated
+
+.vercel
+.env*
