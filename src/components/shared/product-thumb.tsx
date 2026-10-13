@@ -25,7 +25,8 @@ export function ProductThumb({ name, imageUrl, className }: { name: string; imag
   }
   const letters = name
     .split(/\s+/)
-    .filter(Boolean)
+    // Skip "&", "-" and other words that do not start with a letter or digit ("Fries & Fried" → "FF").
+    .filter((w) => /^[\p{L}\p{N}]/u.test(w))
     .slice(0, 2)
     .map((w) => w[0]!.toUpperCase())
     .join("");
