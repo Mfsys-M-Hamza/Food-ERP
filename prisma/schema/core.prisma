@@ -1,0 +1,132 @@
+// ─── Organisation, settings, numbering, files ────────────────────────────────
+
+enum TerminalKind {
+  POS
+  KDS
+  RIDER
+  OTHER
+}
+
+model Branch {
+  id            String   @id @default(uuid()) @db.Uuid
+  code          String   @unique
+  name          String
+  address       String?
+  phone         String?
+  timezone      String   @default("Asia/Karachi")
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  terminals          PosTerminal[]
+  settings           Setting[]
+  businessHours      BusinessHour[]
+  hourExceptions     BusinessHourException[]
+  numberSequences    NumberSequence[]
+  userRoles          UserRole[]
+  auditLogs          AuditLog[]
+
+  @@map("branches")
+}
+
+model PosTerminal {
+  id              String       @id @default(uuid()) @db.Uuid
+  branchId        String       @map("branch_id") @db.Uuid
+  name            String
+  kind            TerminalKind @default(POS)
+  deviceTokenHash String?      @map("device_token_hash")
+  lastSeenAt      DateTime?    @map("last_seen_at") @db.Timestamptz(6)
+  isActive        Boolean      @default(true) @map("is_active")
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  cashShifts CashShift[]
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Restrict)
+
+  @@unique([branchId, name])
+  @@map("pos_terminals")
+}
+
+/// Typed key/value settings. `value` is validated by the Zod registry in
+/// src/server/core/settings/registry.ts. branch_id NULL = global value.
+model Setting {
+  id        String   @id @default(uuid()) @db.Uuid
+  branchId  String?  @map("branch_id") @db.Uuid
+  key       String
+  value     Json
+  updatedBy String?  @map("updated_by")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  branch Branch? @relation(fields: [branchId], references: [id], onDelete: Restrict)
+
+  // A partial unique index for (key) WHERE branch_id IS NULL is added in SQL.
+  @@unique([branchId, key])
+  @@map("settings")
+}
+
+model BusinessHour {
+  id        String   @id @default(uuid()) @db.Uuid
+  branchId  String   @map("branch_id") @db.Uuid
+  /// 0 = Sunday … 6 = Saturday
+  weekday   Int
+  opensAt   String   @map("opens_at") // "HH:mm" local time
+  closesAt  String   @map("closes_at") // may be < opensAt for past-midnight trading
+  isClosed  Boolean  @default(false) @map("is_closed")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Restrict)
+
+  @@unique([branchId, weekday])
+  @@map("business_hours")
+}
+
+model BusinessHourException {
+  id        String   @id @default(uuid()) @db.Uuid
+  branchId  String   @map("branch_id") @db.Uuid
+  date      DateTime @db.Date
+  isClosed  Boolean  @default(true) @map("is_closed")
+  opensAt   String?  @map("opens_at")
+  closesAt  String?  @map("closes_at")
+  note      String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Restrict)
+
+  @@unique([branchId, date])
+  @@map("business_hour_exceptions")
+}
+
+/// Gap-free document counters, incremented with UPDATE … RETURNING inside the
+/// business transaction (row lock prevents duplicates under concurrency).
+model NumberSequence {
+  branchId  String   @map("branch_id") @db.Uuid
+  scope     String // ORDER, EXPENSE, PURCHASE, WASTAGE, REFUND, SHIFT …
+  periodKey String   @map("period_key") // e.g. 20261012 or 202610 or ALL
+  lastValue Int      @default(0) @map("last_value")
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Restrict)
+
+  @@id([branchId, scope, periodKey])
+  @@map("number_sequences")
+}
+
+model FileObject {
+  id         String   @id @default(uuid()) @db.Uuid
+  bucket     String
+  path       String
+  mimeType   String   @map("mime_type")
+  sizeBytes  Int      @map("size_bytes")
+  isPublic   Boolean  @map("is_public")
+  uploadedBy String?  @map("uploaded_by")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  expenses Expense[]
+
+  @@unique([bucket, path])
+  @@map("files")
+}

@@ -1,0 +1,13 @@
+// Prisma schema root. Models are split by module in this folder.
+// Conventions: snake_case tables/columns via @@map/@map, uuid keys,
+// money = Decimal(12,2), quantities = Decimal(14,3), unit cost = Decimal(14,4).
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}

@@ -39,3 +39,16 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local database files
+/.data
+/public/uploads
+# keep env template
+!.env.example
+# playwright
+/test-results
+/playwright-report
+/playwright/.cache
+/tests/e2e/.auth
+# prisma generated client
+/src/generated

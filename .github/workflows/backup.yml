@@ -1,0 +1,73 @@
+name: Database backup
+
+# Nightly encrypted backup of the production database, kept as a private
+# workflow artifact for 30 days, then restored into a throwaway database to
+# prove the backup is usable. Supabase's own daily backups are a second copy.
+#
+# Repository secrets needed (Settings → Secrets and variables → Actions):
+#   BACKUP_DATABASE_URL  direct (non-pooled) Postgres URL of production, e.g. Supabase "Session" connection string
+#   BACKUP_PASSPHRASE    long random passphrase; store it in the password manager too (needed to restore)
+
+on:
+  schedule:
+    - cron: "0 22 * * *" # 03:00 Pakistan time
+  workflow_dispatch:
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      verify:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: restore_check
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - name: Install PostgreSQL 17 client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-17
+
+      - name: Dump
+        env:
+          DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          STAMP=$(date -u +%Y%m%d-%H%M)
+          echo "STAMP=$STAMP" >> "$GITHUB_ENV"
+          /usr/lib/postgresql/17/bin/pg_dump --format=custom --no-owner --no-acl --schema=public --file="food-erp-$STAMP.dump" "$DATABASE_URL"
+          ls -lh "food-erp-$STAMP.dump"
+
+      - name: Restore into a throwaway database (proves the backup works)
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -euo pipefail
+          /usr/lib/postgresql/17/bin/pg_restore --no-owner --no-acl --exit-on-error -h localhost -U postgres -d restore_check "food-erp-$STAMP.dump"
+          psql -h localhost -U postgres -d restore_check -v ON_ERROR_STOP=1 -c "SELECT (SELECT count(*) FROM orders) AS orders, (SELECT count(*) FROM users) AS users, (SELECT max(created_at) FROM audit_logs) AS last_audit, (SELECT count(*) FROM _prisma_migrations) AS migrations;"
+
+      - name: Encrypt
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          gpg --batch --yes --symmetric --cipher-algo AES256 --passphrase "$BACKUP_PASSPHRASE" --output "food-erp-$STAMP.dump.gpg" "food-erp-$STAMP.dump"
+          shred -u "food-erp-$STAMP.dump"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: food-erp-backup-${{ env.STAMP }}
+          path: food-erp-*.dump.gpg
+          retention-days: 30
+          if-no-files-found: error

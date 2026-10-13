@@ -1,6 +1,6 @@
 # Food Business ERP, POS & Online Ordering — Architecture Proposal
 
-Status: **DRAFT — awaiting owner approval before Phase 1**
+Status: **APPROVED 2026-10-12 with recommended defaults** (decisions recorded in PHASES.md)
 Date: 2026-10-12
 Scope: single-branch restaurant / fast-food business, fewer than 10 staff, Pakistan (PKR, Asia/Karachi), ready for multiple branches later.
 

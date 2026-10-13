@@ -1,0 +1,66 @@
+// ─── Expenses ────────────────────────────────────────────────────────────────
+// Every rupee that leaves the business (other than supplier invoices) is an
+// expense: utilities, rent, petty cash, salary advances and paid salaries.
+
+enum ExpensePaymentMethod {
+  CASH_DRAWER
+  CASH_OTHER
+  BANK_TRANSFER
+  CHEQUE
+  CARD
+}
+
+enum ExpenseStatus {
+  ACTIVE
+  VOIDED
+}
+
+model ExpenseCategory {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  /// System categories (salaries, salary_advances) are used by payroll and cannot be archived.
+  systemKey String?  @unique @map("system_key")
+  sortOrder Int      @default(0) @map("sort_order")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  expenses Expense[]
+
+  @@map("expense_categories")
+}
+
+model Expense {
+  id            String               @id @default(uuid()) @db.Uuid
+  branchId      String               @map("branch_id") @db.Uuid
+  expenseNumber String               @unique @map("expense_number")
+  categoryId    String               @map("category_id") @db.Uuid
+  amount        Decimal              @db.Decimal(12, 2)
+  expenseDate   DateTime             @map("expense_date") @db.Date
+  paymentMethod ExpensePaymentMethod @map("payment_method")
+  payee         String?
+  description   String
+  reference     String?
+  receiptFileId String?              @map("receipt_file_id") @db.Uuid
+  cashShiftId   String?              @map("cash_shift_id") @db.Uuid
+  /// What created it automatically (payslip, employee_advance), if anything.
+  sourceType    String?              @map("source_type")
+  sourceId      String?              @map("source_id") @db.Uuid
+  status        ExpenseStatus        @default(ACTIVE)
+  voidedById    String?              @map("voided_by") @db.Uuid
+  voidedAt      DateTime?            @map("voided_at") @db.Timestamptz(6)
+  voidReason    String?              @map("void_reason")
+  createdById   String?              @map("created_by") @db.Uuid
+  createdAt     DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  category ExpenseCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  receipt  FileObject?     @relation(fields: [receiptFileId], references: [id], onDelete: SetNull)
+
+  @@index([branchId, expenseDate])
+  @@index([categoryId, expenseDate])
+  @@index([cashShiftId])
+  @@index([createdById, createdAt])
+  @@index([sourceType, sourceId])
+  @@map("expenses")
+}

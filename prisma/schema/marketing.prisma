@@ -1,0 +1,93 @@
+// ─── Coupons and loyalty ─────────────────────────────────────────────────────
+
+enum CouponType {
+  PERCENT
+  AMOUNT
+  FREE_DELIVERY
+}
+
+enum CouponChannel {
+  ALL
+  ONLINE
+  POS
+}
+
+model Coupon {
+  id               String        @id @default(uuid()) @db.Uuid
+  /// Upper-case, unique among non-archived coupons.
+  code             String
+  description      String?
+  type             CouponType
+  /// Percent (0–100) or rupee amount; ignored for FREE_DELIVERY.
+  value            Decimal       @default(0) @db.Decimal(12, 2)
+  /// Cap for percentage coupons.
+  maxDiscount      Decimal?      @map("max_discount") @db.Decimal(12, 2)
+  minOrder         Decimal       @default(0) @map("min_order") @db.Decimal(12, 2)
+  startsAt         DateTime?     @map("starts_at") @db.Timestamptz(6)
+  endsAt           DateTime?     @map("ends_at") @db.Timestamptz(6)
+  usageLimit       Int?          @map("usage_limit")
+  perCustomerLimit Int?          @map("per_customer_limit")
+  usedCount        Int           @default(0) @map("used_count")
+  firstOrderOnly   Boolean       @default(false) @map("first_order_only")
+  channel          CouponChannel @default(ALL)
+  isActive         Boolean       @default(true) @map("is_active")
+  createdById      String?       @map("created_by") @db.Uuid
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt        DateTime?     @map("deleted_at") @db.Timestamptz(6)
+
+  redemptions CouponRedemption[]
+
+  @@index([isActive])
+  @@map("coupons")
+}
+
+model CouponRedemption {
+  id         String    @id @default(uuid()) @db.Uuid
+  couponId   String    @map("coupon_id") @db.Uuid
+  orderId    String    @unique @map("order_id") @db.Uuid
+  customerId String?   @map("customer_id") @db.Uuid
+  /// Phone used, so guests cannot reuse a once-per-customer coupon.
+  phone      String?
+  amount     Decimal   @db.Decimal(12, 2)
+  reversedAt DateTime? @map("reversed_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  coupon Coupon @relation(fields: [couponId], references: [id], onDelete: Restrict)
+
+  @@index([couponId, customerId])
+  @@index([couponId, phone])
+  @@map("coupon_redemptions")
+}
+
+enum LoyaltyTxType {
+  EARN
+  REDEEM
+  REVERSE_EARN
+  REVERSE_REDEEM
+  EXPIRE
+  ADJUST
+}
+
+/// Append-only points ledger; customers.loyalty_points is its running balance.
+model LoyaltyTransaction {
+  id           BigInt        @id @default(autoincrement())
+  customerId   String        @map("customer_id") @db.Uuid
+  orderId      String?       @map("order_id") @db.Uuid
+  type         LoyaltyTxType
+  /// Signed: earned / returned points are positive, spent / expired negative.
+  points       Int
+  balanceAfter Int           @map("balance_after")
+  /// For EARN rows: when the points lapse (null = never).
+  expiresAt    DateTime?     @map("expires_at") @db.Timestamptz(6)
+  /// For EARN rows: points from this row already used or expired.
+  consumed     Int           @default(0)
+  note         String?
+  createdById  String?       @map("created_by") @db.Uuid
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([customerId, createdAt])
+  @@index([orderId])
+  @@index([type, expiresAt])
+  @@map("loyalty_transactions")
+}

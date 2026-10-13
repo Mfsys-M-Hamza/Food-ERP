@@ -1,0 +1,404 @@
+// ─── Orders, payments, refunds, delivery, cash register ─────────────────────
+// Financial rows are never deleted (database trigger). Lines snapshot names,
+// prices and estimated costs at sale time.
+
+enum OrderSource {
+  POS
+  PHONE
+  WEBSITE
+  PWA
+  ADMIN
+  AGGREGATOR
+}
+
+enum OrderType {
+  TAKEAWAY
+  DELIVERY
+  DINE_IN
+}
+
+enum OrderStatus {
+  NEW
+  ACCEPTED
+  PREPARING
+  READY
+  OUT_FOR_DELIVERY
+  COMPLETED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+  PARTIALLY_REFUNDED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  ONLINE
+  WALLET
+  LOYALTY
+}
+
+enum PaymentRecordStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  VOIDED
+}
+
+enum DiscountKind {
+  MANUAL
+  COUPON
+  LOYALTY
+  PROMOTION
+}
+
+enum DeliveryStatus {
+  PENDING
+  ASSIGNED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  FAILED
+  RETURNED
+}
+
+enum CashShiftStatus {
+  OPEN
+  CLOSED
+  APPROVED
+}
+
+enum CashTxType {
+  SALE
+  REFUND
+  EXPENSE
+  PAY_IN
+  PAY_OUT
+  RIDER_SETTLEMENT
+  SUPPLIER_PAYMENT
+  ADJUSTMENT
+}
+
+model Order {
+  id                    String        @id @default(uuid()) @db.Uuid
+  branchId              String        @map("branch_id") @db.Uuid
+  orderNumber           String        @unique @map("order_number")
+  displayNumber         Int           @map("display_number")
+  businessDate          DateTime      @map("business_date") @db.Date
+  source                OrderSource
+  type                  OrderType
+  status                OrderStatus
+  paymentStatus         PaymentStatus @default(UNPAID) @map("payment_status")
+  customerId            String?       @map("customer_id") @db.Uuid
+  customerName          String?       @map("customer_name")
+  customerPhone         String?       @map("customer_phone")
+  tableLabel            String?       @map("table_label")
+  createdById           String?       @map("created_by") @db.Uuid
+  cashShiftId           String?       @map("cash_shift_id") @db.Uuid
+  terminalId            String?       @map("terminal_id") @db.Uuid
+  subtotal              Decimal       @db.Decimal(12, 2)
+  discountTotal         Decimal       @default(0) @map("discount_total") @db.Decimal(12, 2)
+  serviceCharge         Decimal       @default(0) @map("service_charge") @db.Decimal(12, 2)
+  deliveryCharge        Decimal       @default(0) @map("delivery_charge") @db.Decimal(12, 2)
+  taxTotal              Decimal       @default(0) @map("tax_total") @db.Decimal(12, 2)
+  taxRate               Decimal       @default(0) @map("tax_rate") @db.Decimal(5, 2)
+  taxInclusive          Boolean       @default(false) @map("tax_inclusive")
+  roundingAdjustment    Decimal       @default(0) @map("rounding_adjustment") @db.Decimal(12, 2)
+  grandTotal            Decimal       @map("grand_total") @db.Decimal(12, 2)
+  amountPaid            Decimal       @default(0) @map("amount_paid") @db.Decimal(12, 2)
+  amountRefunded        Decimal       @default(0) @map("amount_refunded") @db.Decimal(12, 2)
+  estimatedCostTotal    Decimal       @default(0) @map("estimated_cost_total") @db.Decimal(14, 4)
+  couponId              String?       @map("coupon_id") @db.Uuid
+  loyaltyPointsRedeemed Int           @default(0) @map("loyalty_points_redeemed")
+  customerNote          String?       @map("customer_note")
+  kitchenNote           String?       @map("kitchen_note")
+  estimatedReadyAt      DateTime?     @map("estimated_ready_at") @db.Timestamptz(6)
+  scheduledFor          DateTime?     @map("scheduled_for") @db.Timestamptz(6)
+  acceptedAt            DateTime?     @map("accepted_at") @db.Timestamptz(6)
+  preparingAt           DateTime?     @map("preparing_at") @db.Timestamptz(6)
+  readyAt               DateTime?     @map("ready_at") @db.Timestamptz(6)
+  completedAt           DateTime?     @map("completed_at") @db.Timestamptz(6)
+  cancelledAt           DateTime?     @map("cancelled_at") @db.Timestamptz(6)
+  cancelReason          String?       @map("cancel_reason")
+  cancelledById         String?       @map("cancelled_by") @db.Uuid
+  stockDeductedAt       DateTime?     @map("stock_deducted_at") @db.Timestamptz(6)
+  idempotencyKey        String        @unique @map("idempotency_key")
+  trackingToken         String        @unique @map("tracking_token")
+  offlineCreatedAt      DateTime?     @map("offline_created_at") @db.Timestamptz(6)
+  syncFlags             Json?         @map("sync_flags")
+  version               Int           @default(0)
+  createdAt             DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  customer      Customer?            @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  cashShift     CashShift?           @relation(fields: [cashShiftId], references: [id], onDelete: Restrict)
+  createdBy     User?                @relation("OrderCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  items         OrderItem[]
+  statusHistory OrderStatusHistory[]
+  discounts     OrderDiscount[]
+  payments      Payment[]
+  refunds       Refund[]
+  delivery      Delivery?
+
+  @@unique([branchId, businessDate, displayNumber])
+  @@index([branchId, status, createdAt])
+  @@index([branchId, businessDate])
+  @@index([customerId, createdAt])
+  @@index([cashShiftId])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id               String   @id @default(uuid()) @db.Uuid
+  orderId          String   @map("order_id") @db.Uuid
+  productId        String   @map("product_id") @db.Uuid
+  variantId        String?  @map("variant_id") @db.Uuid
+  productName      String   @map("product_name")
+  variantName      String?  @map("variant_name")
+  sku              String
+  categoryId       String?  @map("category_id") @db.Uuid
+  quantity         Int
+  unitPrice        Decimal  @map("unit_price") @db.Decimal(12, 2)
+  addonsUnitTotal  Decimal  @default(0) @map("addons_unit_total") @db.Decimal(12, 2)
+  lineTotal        Decimal  @map("line_total") @db.Decimal(12, 2)
+  unitCostEstimate Decimal  @default(0) @map("unit_cost_estimate") @db.Decimal(14, 4)
+  note             String?
+  sortOrder        Int      @default(0) @map("sort_order")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  order     Order              @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  addons    OrderItemAddon[]
+  removals  OrderItemRemoval[]
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+model OrderItemAddon {
+  id               String  @id @default(uuid()) @db.Uuid
+  orderItemId      String  @map("order_item_id") @db.Uuid
+  addonId          String  @map("addon_id") @db.Uuid
+  groupName        String  @map("group_name")
+  addonName        String  @map("addon_name")
+  unitPrice        Decimal @map("unit_price") @db.Decimal(12, 2)
+  quantity         Int     @default(1)
+  unitCostEstimate Decimal @default(0) @map("unit_cost_estimate") @db.Decimal(14, 4)
+
+  item OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+
+  @@index([orderItemId])
+  @@map("order_item_addons")
+}
+
+model OrderItemRemoval {
+  id                  String  @id @default(uuid()) @db.Uuid
+  orderItemId         String  @map("order_item_id") @db.Uuid
+  removableOptionId   String? @map("removable_option_id") @db.Uuid
+  label               String
+
+  item OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+
+  @@index([orderItemId])
+  @@map("order_item_removals")
+}
+
+model OrderStatusHistory {
+  id          String       @id @default(uuid()) @db.Uuid
+  orderId     String       @map("order_id") @db.Uuid
+  fromStatus  OrderStatus? @map("from_status")
+  toStatus    OrderStatus  @map("to_status")
+  changedById String?      @map("changed_by") @db.Uuid
+  source      String // POS, KDS, ADMIN, CUSTOMER, SYSTEM, RIDER
+  reason      String?
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@index([orderId, createdAt])
+  @@map("order_status_history")
+}
+
+model OrderDiscount {
+  id           String       @id @default(uuid()) @db.Uuid
+  orderId      String       @map("order_id") @db.Uuid
+  kind         DiscountKind
+  couponId     String?      @map("coupon_id") @db.Uuid
+  percent      Decimal?     @db.Decimal(5, 2)
+  amount       Decimal      @db.Decimal(12, 2)
+  reason       String?
+  appliedById  String?      @map("applied_by") @db.Uuid
+  approvedById String?      @map("approved_by") @db.Uuid
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@map("order_discounts")
+}
+
+model Payment {
+  id                String              @id @default(uuid()) @db.Uuid
+  branchId          String              @map("branch_id") @db.Uuid
+  orderId           String              @map("order_id") @db.Uuid
+  cashShiftId       String?             @map("cash_shift_id") @db.Uuid
+  method            PaymentMethod
+  provider          String?
+  providerReference String?             @map("provider_reference")
+  amount            Decimal             @db.Decimal(12, 2)
+  tendered          Decimal?            @db.Decimal(12, 2)
+  changeGiven       Decimal?            @map("change_given") @db.Decimal(12, 2)
+  status            PaymentRecordStatus @default(SUCCEEDED)
+  receivedById      String?             @map("received_by") @db.Uuid
+  idempotencyKey    String?             @unique @map("idempotency_key")
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  order     Order      @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  cashShift CashShift? @relation(fields: [cashShiftId], references: [id], onDelete: Restrict)
+  refunds   Refund[]
+
+  @@unique([provider, providerReference])
+  @@index([orderId])
+  @@index([cashShiftId])
+  @@index([createdAt])
+  @@map("payments")
+}
+
+model Refund {
+  id           String        @id @default(uuid()) @db.Uuid
+  branchId     String        @map("branch_id") @db.Uuid
+  refundNumber String        @unique @map("refund_number")
+  orderId      String        @map("order_id") @db.Uuid
+  paymentId    String?       @map("payment_id") @db.Uuid
+  amount       Decimal       @db.Decimal(12, 2)
+  method       PaymentMethod
+  reason       String
+  restock      Boolean       @default(false)
+  requestedById String?      @map("requested_by") @db.Uuid
+  approvedById String?       @map("approved_by") @db.Uuid
+  cashShiftId  String?       @map("cash_shift_id") @db.Uuid
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([createdAt])
+  @@map("refunds")
+}
+
+model Delivery {
+  id              String         @id @default(uuid()) @db.Uuid
+  orderId         String         @unique @map("order_id") @db.Uuid
+  branchId        String         @map("branch_id") @db.Uuid
+  zoneId          String?        @map("zone_id") @db.Uuid
+  riderId         String?        @map("rider_id") @db.Uuid
+  recipientName   String         @map("recipient_name")
+  phone           String
+  addressText     String         @map("address_text")
+  landmark        String?
+  latitude        Decimal?       @db.Decimal(9, 6)
+  longitude       Decimal?       @db.Decimal(9, 6)
+  mapUrl          String?        @map("map_url")
+  deliveryCharge  Decimal        @default(0) @map("delivery_charge") @db.Decimal(12, 2)
+  status          DeliveryStatus @default(PENDING)
+  assignedAt      DateTime?      @map("assigned_at") @db.Timestamptz(6)
+  dispatchedAt    DateTime?      @map("dispatched_at") @db.Timestamptz(6)
+  deliveredAt     DateTime?      @map("delivered_at") @db.Timestamptz(6)
+  codAmount       Decimal        @default(0) @map("cod_amount") @db.Decimal(12, 2)
+  codCollectedAt  DateTime?      @map("cod_collected_at") @db.Timestamptz(6)
+  codSettledShiftId String?      @map("cod_settled_shift_id") @db.Uuid
+  codSettledAt    DateTime?      @map("cod_settled_at") @db.Timestamptz(6)
+  notes           String?
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  order Order         @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  zone  DeliveryZone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  rider User?         @relation("DeliveryRider", fields: [riderId], references: [id], onDelete: Restrict)
+
+  @@index([riderId, status])
+  @@index([status])
+  @@map("deliveries")
+}
+
+/// Parked POS carts. Not a financial record; deleted when resumed.
+model HeldOrder {
+  id          String   @id @default(uuid()) @db.Uuid
+  branchId    String   @map("branch_id") @db.Uuid
+  terminalId  String?  @map("terminal_id") @db.Uuid
+  label       String
+  payload     Json
+  itemCount   Int      @map("item_count")
+  total       Decimal  @db.Decimal(12, 2)
+  createdById String?  @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([branchId, createdAt])
+  @@map("held_orders")
+}
+
+model CashShift {
+  id                    String          @id @default(uuid()) @db.Uuid
+  branchId              String          @map("branch_id") @db.Uuid
+  terminalId            String          @map("terminal_id") @db.Uuid
+  shiftNumber           String          @unique @map("shift_number")
+  openedById            String          @map("opened_by") @db.Uuid
+  openedAt              DateTime        @default(now()) @map("opened_at") @db.Timestamptz(6)
+  openingCash           Decimal         @map("opening_cash") @db.Decimal(12, 2)
+  closedById            String?         @map("closed_by") @db.Uuid
+  closedAt              DateTime?       @map("closed_at") @db.Timestamptz(6)
+  expectedCash          Decimal?        @map("expected_cash") @db.Decimal(12, 2)
+  countedCash           Decimal?        @map("counted_cash") @db.Decimal(12, 2)
+  difference            Decimal?        @db.Decimal(12, 2)
+  denominationBreakdown Json?           @map("denomination_breakdown")
+  status                CashShiftStatus @default(OPEN)
+  approvedById          String?         @map("approved_by") @db.Uuid
+  approvedAt            DateTime?       @map("approved_at") @db.Timestamptz(6)
+  closingNote           String?         @map("closing_note")
+  createdAt             DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  openedBy     User              @relation("ShiftOpenedBy", fields: [openedById], references: [id], onDelete: Restrict)
+  terminal     PosTerminal       @relation(fields: [terminalId], references: [id], onDelete: Restrict)
+  transactions CashTransaction[]
+  orders       Order[]
+  payments     Payment[]
+
+  @@index([branchId, openedAt])
+  @@index([status])
+  @@map("cash_shifts")
+}
+
+model CashTransaction {
+  id            String     @id @default(uuid()) @db.Uuid
+  cashShiftId   String     @map("cash_shift_id") @db.Uuid
+  type          CashTxType
+  /// Signed: money into the drawer is positive, out is negative.
+  amount        Decimal    @db.Decimal(12, 2)
+  referenceType String?    @map("reference_type")
+  referenceId   String?    @map("reference_id")
+  reason        String?
+  createdById   String?    @map("created_by") @db.Uuid
+  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  shift CashShift @relation(fields: [cashShiftId], references: [id], onDelete: Restrict)
+
+  @@index([cashShiftId, createdAt])
+  @@map("cash_transactions")
+}
+
+/// Simple fixed-window throttle used for PIN attempts and other abuse-prone actions.
+model Throttle {
+  key         String   @id
+  count       Int
+  windowStart DateTime @map("window_start") @db.Timestamptz(6)
+
+  @@map("throttles")
+}

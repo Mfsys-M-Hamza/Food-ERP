@@ -1,0 +1,81 @@
+// ─── Notifications, outgoing messages, one-time codes ───────────────────────
+
+enum NotificationSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+/// In-app notification for one staff member.
+model Notification {
+  id        String               @id @default(uuid()) @db.Uuid
+  branchId  String?              @map("branch_id") @db.Uuid
+  userId    String               @map("user_id") @db.Uuid
+  type      String
+  severity  NotificationSeverity @default(INFO)
+  title     String
+  body      String?
+  link      String?
+  /// Prevents the same alert being raised twice for the same user.
+  dedupeKey String?              @map("dedupe_key")
+  readAt    DateTime?            @map("read_at") @db.Timestamptz(6)
+  createdAt DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, readAt, createdAt])
+  @@map("notifications")
+}
+
+enum MessageChannel {
+  EMAIL
+  SMS
+  WHATSAPP
+}
+
+enum MessageStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+/// Every e-mail / SMS / WhatsApp the system sends, for troubleshooting and retries.
+model OutboundMessage {
+  id          String         @id @default(uuid()) @db.Uuid
+  channel     MessageChannel
+  recipient   String
+  subject     String?
+  body        String
+  status      MessageStatus  @default(PENDING)
+  provider    String?
+  error       String?
+  attempts    Int            @default(0)
+  relatedType String?        @map("related_type")
+  relatedId   String?        @map("related_id")
+  sentAt      DateTime?      @map("sent_at") @db.Timestamptz(6)
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([status, createdAt])
+  @@map("outbound_messages")
+}
+
+enum OtpPurpose {
+  PHONE_VERIFY
+}
+
+model OtpCode {
+  id         String     @id @default(uuid()) @db.Uuid
+  purpose    OtpPurpose
+  phone      String
+  customerId String?    @map("customer_id") @db.Uuid
+  /// HMAC of the code; the code itself is never stored.
+  codeHash   String     @map("code_hash")
+  attempts   Int        @default(0)
+  expiresAt  DateTime   @map("expires_at") @db.Timestamptz(6)
+  consumedAt DateTime?  @map("consumed_at") @db.Timestamptz(6)
+  ip         String?
+  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([phone, purpose, createdAt])
+  @@map("otp_codes")
+}

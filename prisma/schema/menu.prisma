@@ -1,0 +1,149 @@
+// ─── Menu ───────────────────────────────────────────────────────────────────
+// Menu rows are never hard-deleted once used: archive with deleted_at so past
+// orders keep their references. Order lines also snapshot names and prices.
+
+enum ProductType {
+  SIMPLE
+  DEAL
+}
+
+model Category {
+  id          String    @id @default(uuid()) @db.Uuid
+  name        String
+  slug        String    @unique
+  description String?
+  imageUrl    String?   @map("image_url")
+  sortOrder   Int       @default(0) @map("sort_order")
+  isActive    Boolean   @default(true) @map("is_active")
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  products Product[]
+
+  @@index([isActive, sortOrder])
+  @@map("categories")
+}
+
+model Product {
+  id              String      @id @default(uuid()) @db.Uuid
+  categoryId      String      @map("category_id") @db.Uuid
+  type            ProductType @default(SIMPLE)
+  sku             String      @unique
+  name            String
+  slug            String      @unique
+  description     String?
+  imageUrl        String?     @map("image_url")
+  basePrice       Decimal     @map("base_price") @db.Decimal(12, 2)
+  /// Manual cost estimate per unit. Replaced by the recipe cost once a recipe exists (Phase 6).
+  cost            Decimal     @default(0) @db.Decimal(14, 4)
+  prepTimeMinutes Int         @default(10) @map("prep_time_minutes")
+  /// false = temporarily OUT OF STOCK
+  isAvailable     Boolean     @default(true) @map("is_available")
+  /// false = hidden everywhere (not published)
+  isActive        Boolean     @default(true) @map("is_active")
+  isFeatured      Boolean     @default(false) @map("is_featured")
+  showOnPos       Boolean     @default(true) @map("show_on_pos")
+  showOnline      Boolean     @default(true) @map("show_online")
+  sortOrder       Int         @default(0) @map("sort_order")
+  deletedAt       DateTime?   @map("deleted_at") @db.Timestamptz(6)
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  category    Category                  @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  variants    ProductVariant[]
+  addonGroups ProductAddonGroup[]
+  removables  ProductRemovableOption[]
+
+  @@index([categoryId, sortOrder])
+  @@index([isActive, showOnPos])
+  @@index([isActive, showOnline])
+  @@map("products")
+}
+
+model ProductVariant {
+  id          String    @id @default(uuid()) @db.Uuid
+  productId   String    @map("product_id") @db.Uuid
+  name        String
+  sku         String?   @unique
+  /// Full selling price of this variant (replaces the product base price).
+  price       Decimal   @db.Decimal(12, 2)
+  cost        Decimal   @default(0) @db.Decimal(14, 4)
+  isDefault   Boolean   @default(false) @map("is_default")
+  isAvailable Boolean   @default(true) @map("is_available")
+  sortOrder   Int       @default(0) @map("sort_order")
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([productId, sortOrder])
+  @@map("product_variants")
+}
+
+model AddonGroup {
+  id          String    @id @default(uuid()) @db.Uuid
+  name        String
+  /// Customer-facing title, e.g. "Choose your drink"
+  title       String?
+  minSelect   Int       @default(0) @map("min_select")
+  maxSelect   Int       @default(1) @map("max_select")
+  sortOrder   Int       @default(0) @map("sort_order")
+  isActive    Boolean   @default(true) @map("is_active")
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  addons   Addon[]
+  products ProductAddonGroup[]
+
+  @@map("addon_groups")
+}
+
+model Addon {
+  id           String    @id @default(uuid()) @db.Uuid
+  addonGroupId String    @map("addon_group_id") @db.Uuid
+  name         String
+  price        Decimal   @default(0) @db.Decimal(12, 2)
+  cost         Decimal   @default(0) @db.Decimal(14, 4)
+  isAvailable  Boolean   @default(true) @map("is_available")
+  sortOrder    Int       @default(0) @map("sort_order")
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  group AddonGroup @relation(fields: [addonGroupId], references: [id], onDelete: Restrict)
+
+  @@index([addonGroupId, sortOrder])
+  @@map("addons")
+}
+
+model ProductAddonGroup {
+  productId    String @map("product_id") @db.Uuid
+  addonGroupId String @map("addon_group_id") @db.Uuid
+  sortOrder    Int    @default(0) @map("sort_order")
+
+  product Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  group   AddonGroup @relation(fields: [addonGroupId], references: [id], onDelete: Restrict)
+
+  @@id([productId, addonGroupId])
+  @@map("product_addon_groups")
+}
+
+/// "No onions", "No mayo" — ingredients a customer may remove.
+model ProductRemovableOption {
+  id           String   @id @default(uuid()) @db.Uuid
+  productId    String   @map("product_id") @db.Uuid
+  label        String
+  /// Linked ingredient (Phase 6) so removal skips its stock deduction.
+  ingredientId String?  @map("ingredient_id") @db.Uuid
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  ingredient Ingredient? @relation(fields: [ingredientId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "product_removable_options_ingredient_fk")
+
+  @@index([productId])
+  @@map("product_removable_options")
+}

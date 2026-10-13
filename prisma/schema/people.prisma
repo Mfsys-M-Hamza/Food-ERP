@@ -1,0 +1,254 @@
+// ─── Employees, attendance and payroll ───────────────────────────────────────
+
+enum EmployeeStatus {
+  ACTIVE
+  ON_LEAVE
+  LEFT
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+}
+
+enum PayType {
+  MONTHLY
+  DAILY
+  HOURLY
+}
+
+enum AttendanceStatus {
+  PRESENT
+  LATE
+  HALF_DAY
+  ABSENT
+  PAID_LEAVE
+  UNPAID_LEAVE
+  OFF
+}
+
+enum AttendanceSource {
+  MANUAL
+  SELF
+  BIOMETRIC
+  IMPORT
+}
+
+enum AdvanceStatus {
+  OPEN
+  RECOVERED
+  CANCELLED
+}
+
+enum PayrollStatus {
+  DRAFT
+  APPROVED
+  PAID
+  CANCELLED
+}
+
+enum PayslipLineKind {
+  EARNING
+  DEDUCTION
+}
+
+model WorkShift {
+  id           String   @id @default(uuid()) @db.Uuid
+  branchId     String   @map("branch_id") @db.Uuid
+  name         String
+  /// Minutes after midnight, local time. End may be smaller than start (ends after midnight).
+  startMinute  Int      @map("start_minute")
+  endMinute    Int      @map("end_minute")
+  graceMinutes Int      @default(10) @map("grace_minutes")
+  breakMinutes Int      @default(0) @map("break_minutes")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  employees  Employee[]
+  attendance Attendance[]
+
+  @@map("work_shifts")
+}
+
+model Employee {
+  id              String         @id @default(uuid()) @db.Uuid
+  branchId        String         @map("branch_id") @db.Uuid
+  employeeCode    String         @unique @map("employee_code")
+  userId          String?        @unique @map("user_id") @db.Uuid
+  fullName        String         @map("full_name")
+  phone           String?
+  designation     String
+  department      String?
+  employmentType  EmploymentType @default(FULL_TIME) @map("employment_type")
+  status          EmployeeStatus @default(ACTIVE)
+  joiningDate     DateTime       @map("joining_date") @db.Date
+  leavingDate     DateTime?      @map("leaving_date") @db.Date
+  workShiftId     String?        @map("work_shift_id") @db.Uuid
+  /// Days off, 0 = Sunday to 6 = Saturday.
+  weeklyOffDays   Int[]          @default([]) @map("weekly_off_days")
+  payType         PayType        @default(MONTHLY) @map("pay_type")
+  /// Monthly salary, daily wage or hourly rate depending on pay_type.
+  baseRate        Decimal        @default(0) @map("base_rate") @db.Decimal(12, 2)
+  /// Per hour; empty = derived from the base rate.
+  overtimeRate    Decimal?       @map("overtime_rate") @db.Decimal(12, 2)
+  /// AES-256-GCM ciphertext (see server/core/crypto.ts). Never store plain text.
+  nationalIdEnc   String?        @map("national_id_enc")
+  nationalIdLast4 String?        @map("national_id_last4")
+  bankAccountEnc  String?        @map("bank_account_enc")
+  bankName        String?        @map("bank_name")
+  address         String?
+  emergencyName   String?        @map("emergency_name")
+  emergencyPhone  String?        @map("emergency_phone")
+  notes           String?
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt       DateTime?      @map("deleted_at") @db.Timestamptz(6)
+
+  user       User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  workShift  WorkShift?        @relation(fields: [workShiftId], references: [id], onDelete: SetNull)
+  attendance Attendance[]
+  advances   EmployeeAdvance[]
+  payslips   Payslip[]
+
+  @@index([branchId, status])
+  @@map("employees")
+}
+
+model Attendance {
+  id              String           @id @default(uuid()) @db.Uuid
+  branchId        String           @map("branch_id") @db.Uuid
+  employeeId      String           @map("employee_id") @db.Uuid
+  /// Business date (a shift ending at 2 am belongs to the previous day).
+  workDate        DateTime         @map("work_date") @db.Date
+  workShiftId     String?          @map("work_shift_id") @db.Uuid
+  status          AttendanceStatus
+  checkInAt       DateTime?        @map("check_in_at") @db.Timestamptz(6)
+  checkOutAt      DateTime?        @map("check_out_at") @db.Timestamptz(6)
+  lateMinutes     Int              @default(0) @map("late_minutes")
+  workedMinutes   Int              @default(0) @map("worked_minutes")
+  overtimeMinutes Int              @default(0) @map("overtime_minutes")
+  source          AttendanceSource @default(MANUAL)
+  /// Device or import reference, for biometric machines later.
+  sourceRef       String?          @map("source_ref")
+  note            String?
+  recordedById    String?          @map("recorded_by") @db.Uuid
+  /// Set when an approved payroll run covers this day.
+  lockedAt        DateTime?        @map("locked_at") @db.Timestamptz(6)
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  employee  Employee   @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  workShift WorkShift? @relation(fields: [workShiftId], references: [id], onDelete: SetNull)
+
+  @@unique([employeeId, workDate])
+  @@index([branchId, workDate])
+  @@map("attendance")
+}
+
+model EmployeeAdvance {
+  id              String        @id @default(uuid()) @db.Uuid
+  branchId        String        @map("branch_id") @db.Uuid
+  employeeId      String        @map("employee_id") @db.Uuid
+  amount          Decimal       @db.Decimal(12, 2)
+  recoveredAmount Decimal       @default(0) @map("recovered_amount") @db.Decimal(12, 2)
+  /// Deducted from each payroll; empty = recover the full balance next payroll.
+  installment     Decimal?      @db.Decimal(12, 2)
+  issuedOn        DateTime      @map("issued_on") @db.Date
+  reason          String?
+  status          AdvanceStatus @default(OPEN)
+  expenseId       String?       @unique @map("expense_id") @db.Uuid
+  createdById     String?       @map("created_by") @db.Uuid
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, status])
+  @@map("employee_advances")
+}
+
+model PayrollRun {
+  id           String        @id @default(uuid()) @db.Uuid
+  branchId     String        @map("branch_id") @db.Uuid
+  runNumber    String        @unique @map("run_number")
+  periodStart  DateTime      @map("period_start") @db.Date
+  periodEnd    DateTime      @map("period_end") @db.Date
+  status       PayrollStatus @default(DRAFT)
+  gross        Decimal       @default(0) @db.Decimal(12, 2)
+  deductions   Decimal       @default(0) @db.Decimal(12, 2)
+  net          Decimal       @default(0) @db.Decimal(12, 2)
+  notes        String?
+  preparedById String?       @map("prepared_by") @db.Uuid
+  approvedById String?       @map("approved_by") @db.Uuid
+  approvedAt   DateTime?     @map("approved_at") @db.Timestamptz(6)
+  paidAt       DateTime?     @map("paid_at") @db.Timestamptz(6)
+  cancelledAt  DateTime?     @map("cancelled_at") @db.Timestamptz(6)
+  version      Int           @default(0)
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  payslips Payslip[]
+
+  @@index([branchId, periodStart])
+  @@map("payroll_runs")
+}
+
+model Payslip {
+  id              String                @id @default(uuid()) @db.Uuid
+  payrollRunId    String                @map("payroll_run_id") @db.Uuid
+  employeeId      String                @map("employee_id") @db.Uuid
+  // Snapshot of the employee at the time of the run.
+  employeeName    String                @map("employee_name")
+  employeeCode    String                @map("employee_code")
+  designation     String
+  payType         PayType               @map("pay_type")
+  baseRate        Decimal               @map("base_rate") @db.Decimal(12, 2)
+  // Attendance summary for the period.
+  periodDays      Int                   @map("period_days")
+  payableDays     Decimal               @map("payable_days") @db.Decimal(6, 2)
+  presentDays     Decimal               @map("present_days") @db.Decimal(6, 2)
+  absentDays      Decimal               @map("absent_days") @db.Decimal(6, 2)
+  leaveDays       Decimal               @map("leave_days") @db.Decimal(6, 2)
+  offDays         Int                   @map("off_days")
+  unrecordedDays  Int                   @map("unrecorded_days")
+  lateCount       Int                   @map("late_count")
+  workedMinutes   Int                   @map("worked_minutes")
+  overtimeMinutes Int                   @map("overtime_minutes")
+  gross           Decimal               @db.Decimal(12, 2)
+  deductions      Decimal               @db.Decimal(12, 2)
+  net             Decimal               @db.Decimal(12, 2)
+  paidAt          DateTime?             @map("paid_at") @db.Timestamptz(6)
+  paymentMethod   ExpensePaymentMethod? @map("payment_method")
+  expenseId       String?               @unique @map("expense_id") @db.Uuid
+  createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  run      PayrollRun    @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  employee Employee      @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  lines    PayslipLine[]
+
+  @@unique([payrollRunId, employeeId])
+  @@index([employeeId])
+  @@map("payslips")
+}
+
+model PayslipLine {
+  id        String          @id @default(uuid()) @db.Uuid
+  payslipId String          @map("payslip_id") @db.Uuid
+  kind      PayslipLineKind
+  /// BASIC, OVERTIME, BONUS, ALLOWANCE, ABSENCE, LATE, ADVANCE, OTHER
+  code      String
+  label     String
+  amount    Decimal         @db.Decimal(12, 2)
+  /// Added by hand (bonus, fine); automatic lines are recalculated.
+  isManual  Boolean         @default(false) @map("is_manual")
+  advanceId String?         @map("advance_id") @db.Uuid
+  sortOrder Int             @default(0) @map("sort_order")
+
+  payslip Payslip @relation(fields: [payslipId], references: [id], onDelete: Cascade)
+
+  @@index([payslipId])
+  @@map("payslip_lines")
+}

@@ -1,0 +1,333 @@
+// ─── Inventory, recipes, wastage, suppliers, purchases ─────────────────────
+// Quantities are stored in the ingredient's BASE unit (g, ml or piece).
+// inventory_transactions is the append-only ledger; ingredient_stock is a cache.
+
+enum BaseUnit {
+  g
+  ml
+  piece
+}
+
+enum InventoryTxType {
+  OPENING
+  PURCHASE
+  SALE
+  SALE_REVERSAL
+  WASTAGE
+  ADJUSTMENT
+  COUNT_VARIANCE
+  TRANSFER_IN
+  TRANSFER_OUT
+}
+
+enum WastageReason {
+  EXPIRED
+  BURNED
+  DAMAGED
+  SPOILED
+  WRONG_PREPARATION
+  STAFF_MEAL
+  CANCELLED_ORDER
+  OTHER
+}
+
+enum StockCountStatus {
+  DRAFT
+  POSTED
+}
+
+enum PurchaseStatus {
+  DRAFT
+  RECEIVED
+  CANCELLED
+}
+
+enum PurchasePaymentStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+}
+
+enum SupplierPaymentMethod {
+  CASH_DRAWER
+  CASH_OTHER
+  BANK_TRANSFER
+  CHEQUE
+  CARD
+}
+
+model Ingredient {
+  id                String    @id @default(uuid()) @db.Uuid
+  name              String
+  sku               String?   @unique
+  category          String?
+  baseUnit          BaseUnit  @map("base_unit")
+  minStock          Decimal   @default(0) @map("min_stock") @db.Decimal(14, 3)
+  reorderQty        Decimal   @default(0) @map("reorder_qty") @db.Decimal(14, 3)
+  /// Weighted average cost per base unit.
+  averageCost       Decimal   @default(0) @map("average_cost") @db.Decimal(14, 4)
+  lastPurchaseCost  Decimal?  @map("last_purchase_cost") @db.Decimal(14, 4)
+  defaultSupplierId String?   @map("default_supplier_id") @db.Uuid
+  trackStock        Boolean   @default(true) @map("track_stock")
+  isActive          Boolean   @default(true) @map("is_active")
+  deletedAt         DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  defaultSupplier Supplier?             @relation("DefaultSupplier", fields: [defaultSupplierId], references: [id], onDelete: SetNull)
+  units           IngredientUnit[]
+  stock           IngredientStock[]
+  transactions    InventoryTransaction[]
+  recipeItems     RecipeItem[]
+  suppliers       SupplierIngredient[]
+  purchaseItems   PurchaseItem[]
+  wastage         Wastage[]
+  countItems      StockCountItem[]
+  removableOptions ProductRemovableOption[]
+
+  @@index([isActive, name])
+  @@map("ingredients")
+}
+
+/// Purchase / counting units for one ingredient, e.g. "box" = 24 piece, "kg" = 1000 g.
+model IngredientUnit {
+  ingredientId String  @map("ingredient_id") @db.Uuid
+  unit         String
+  factorToBase Decimal @map("factor_to_base") @db.Decimal(14, 4)
+
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+
+  @@id([ingredientId, unit])
+  @@map("ingredient_units")
+}
+
+model IngredientStock {
+  branchId     String   @map("branch_id") @db.Uuid
+  ingredientId String   @map("ingredient_id") @db.Uuid
+  onHand       Decimal  @default(0) @map("on_hand") @db.Decimal(14, 3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+
+  @@id([branchId, ingredientId])
+  @@map("ingredient_stock")
+}
+
+model InventoryTransaction {
+  id            BigInt          @id @default(autoincrement())
+  branchId      String          @map("branch_id") @db.Uuid
+  ingredientId  String          @map("ingredient_id") @db.Uuid
+  type          InventoryTxType
+  /// Signed quantity in base units (+ in, - out).
+  quantity      Decimal         @db.Decimal(14, 3)
+  unitCost      Decimal         @default(0) @map("unit_cost") @db.Decimal(14, 4)
+  totalCost     Decimal         @default(0) @map("total_cost") @db.Decimal(14, 2)
+  balanceAfter  Decimal         @map("balance_after") @db.Decimal(14, 3)
+  referenceType String?         @map("reference_type")
+  referenceId   String?         @map("reference_id")
+  reason        String?
+  createdById   String?         @map("created_by") @db.Uuid
+  createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+
+  @@index([branchId, ingredientId, createdAt])
+  @@index([referenceType, referenceId])
+  @@index([type, createdAt])
+  @@map("inventory_transactions")
+}
+
+/// A recipe belongs to exactly one target: product (base), variant, or add-on.
+model Recipe {
+  id        String   @id @default(uuid()) @db.Uuid
+  productId String?  @map("product_id") @db.Uuid
+  variantId String?  @unique @map("variant_id") @db.Uuid
+  addonId   String?  @unique @map("addon_id") @db.Uuid
+  notes     String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  items RecipeItem[]
+
+  @@map("recipes")
+}
+
+model RecipeItem {
+  id           String  @id @default(uuid()) @db.Uuid
+  recipeId     String  @map("recipe_id") @db.Uuid
+  ingredientId String  @map("ingredient_id") @db.Uuid
+  quantity     Decimal @db.Decimal(14, 3)
+
+  recipe     Recipe     @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+
+  @@unique([recipeId, ingredientId])
+  @@map("recipe_items")
+}
+
+model StockCount {
+  id          String           @id @default(uuid()) @db.Uuid
+  branchId    String           @map("branch_id") @db.Uuid
+  countNumber String           @unique @map("count_number")
+  status      StockCountStatus @default(DRAFT)
+  note        String?
+  createdById String?          @map("created_by") @db.Uuid
+  postedById  String?          @map("posted_by") @db.Uuid
+  postedAt    DateTime?        @map("posted_at") @db.Timestamptz(6)
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  items StockCountItem[]
+
+  @@map("stock_counts")
+}
+
+model StockCountItem {
+  id           String   @id @default(uuid()) @db.Uuid
+  stockCountId String   @map("stock_count_id") @db.Uuid
+  ingredientId String   @map("ingredient_id") @db.Uuid
+  expectedQty  Decimal  @map("expected_qty") @db.Decimal(14, 3)
+  countedQty   Decimal? @map("counted_qty") @db.Decimal(14, 3)
+  varianceQty  Decimal? @map("variance_qty") @db.Decimal(14, 3)
+  unitCost     Decimal  @default(0) @map("unit_cost") @db.Decimal(14, 4)
+
+  count      StockCount @relation(fields: [stockCountId], references: [id], onDelete: Cascade)
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+
+  @@unique([stockCountId, ingredientId])
+  @@map("stock_count_items")
+}
+
+model Wastage {
+  id            String        @id @default(uuid()) @db.Uuid
+  branchId      String        @map("branch_id") @db.Uuid
+  wastageNumber String        @unique @map("wastage_number")
+  ingredientId  String?       @map("ingredient_id") @db.Uuid
+  productId     String?       @map("product_id") @db.Uuid
+  variantId     String?       @map("variant_id") @db.Uuid
+  itemName      String        @map("item_name")
+  orderId       String?       @map("order_id") @db.Uuid
+  quantity      Decimal       @db.Decimal(14, 3)
+  unit          String
+  reason        WastageReason
+  estimatedCost Decimal       @default(0) @map("estimated_cost") @db.Decimal(14, 2)
+  employeeName  String?       @map("employee_name")
+  recordedById  String?       @map("recorded_by") @db.Uuid
+  occurredAt    DateTime      @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  notes         String?
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  ingredient Ingredient? @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+
+  @@index([branchId, occurredAt])
+  @@index([reason])
+  @@map("wastage")
+}
+
+model Supplier {
+  id               String    @id @default(uuid()) @db.Uuid
+  name             String
+  contactPerson    String?   @map("contact_person")
+  phone            String?
+  whatsapp         String?
+  email            String?
+  address          String?
+  taxNumber        String?   @map("tax_number")
+  paymentTermsDays Int       @default(0) @map("payment_terms_days")
+  notes            String?
+  isActive         Boolean   @default(true) @map("is_active")
+  deletedAt        DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  ingredients        SupplierIngredient[]
+  defaultIngredients Ingredient[]         @relation("DefaultSupplier")
+  purchases          Purchase[]
+  payments           SupplierPayment[]
+
+  @@map("suppliers")
+}
+
+model SupplierIngredient {
+  supplierId      String    @map("supplier_id") @db.Uuid
+  ingredientId    String    @map("ingredient_id") @db.Uuid
+  lastUnitCost    Decimal?  @map("last_unit_cost") @db.Decimal(14, 4)
+  lastPurchasedAt DateTime? @map("last_purchased_at") @db.Timestamptz(6)
+
+  supplier   Supplier   @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+
+  @@id([supplierId, ingredientId])
+  @@map("supplier_ingredients")
+}
+
+model Purchase {
+  id                String                @id @default(uuid()) @db.Uuid
+  branchId          String                @map("branch_id") @db.Uuid
+  purchaseNumber    String                @unique @map("purchase_number")
+  supplierId        String                @map("supplier_id") @db.Uuid
+  supplierInvoiceNo String?               @map("supplier_invoice_no")
+  invoiceDate       DateTime              @map("invoice_date") @db.Date
+  dueDate           DateTime?             @map("due_date") @db.Date
+  status            PurchaseStatus        @default(DRAFT)
+  paymentStatus     PurchasePaymentStatus @default(UNPAID) @map("payment_status")
+  subtotal          Decimal               @default(0) @db.Decimal(12, 2)
+  discount          Decimal               @default(0) @db.Decimal(12, 2)
+  tax               Decimal               @default(0) @db.Decimal(12, 2)
+  total             Decimal               @default(0) @db.Decimal(12, 2)
+  amountPaid        Decimal               @default(0) @map("amount_paid") @db.Decimal(12, 2)
+  attachmentUrl     String?               @map("attachment_url")
+  notes             String?
+  receivedAt        DateTime?             @map("received_at") @db.Timestamptz(6)
+  receivedById      String?               @map("received_by") @db.Uuid
+  createdById       String?               @map("created_by") @db.Uuid
+  createdAt         DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  supplier Supplier          @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  items    PurchaseItem[]
+  payments SupplierPayment[]
+
+  @@unique([supplierId, supplierInvoiceNo])
+  @@index([supplierId, paymentStatus])
+  @@index([branchId, invoiceDate])
+  @@map("purchases")
+}
+
+model PurchaseItem {
+  id           String  @id @default(uuid()) @db.Uuid
+  purchaseId   String  @map("purchase_id") @db.Uuid
+  ingredientId String  @map("ingredient_id") @db.Uuid
+  quantity     Decimal @db.Decimal(14, 3)
+  unit         String
+  factorToBase Decimal @map("factor_to_base") @db.Decimal(14, 4)
+  baseQuantity Decimal @map("base_quantity") @db.Decimal(14, 3)
+  unitCost     Decimal @map("unit_cost") @db.Decimal(14, 4)
+  lineTotal    Decimal @map("line_total") @db.Decimal(12, 2)
+
+  purchase   Purchase   @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+
+  @@index([purchaseId])
+  @@map("purchase_items")
+}
+
+model SupplierPayment {
+  id          String                @id @default(uuid()) @db.Uuid
+  branchId    String                @map("branch_id") @db.Uuid
+  supplierId  String                @map("supplier_id") @db.Uuid
+  purchaseId  String?               @map("purchase_id") @db.Uuid
+  amount      Decimal               @db.Decimal(12, 2)
+  method      SupplierPaymentMethod
+  reference   String?
+  paidAt      DateTime              @default(now()) @map("paid_at") @db.Timestamptz(6)
+  cashShiftId String?               @map("cash_shift_id") @db.Uuid
+  createdById String?               @map("created_by") @db.Uuid
+  createdAt   DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  supplier Supplier  @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  purchase Purchase? @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+
+  @@index([supplierId])
+  @@map("supplier_payments")
+}
