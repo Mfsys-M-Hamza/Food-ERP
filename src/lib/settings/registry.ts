@@ -112,6 +112,17 @@ export const settingsSchemas = {
     standardShiftHours: z.coerce.number().int().min(1).max(16).default(8),
   }),
 
+  website: z.object({
+    theme: z.enum(["light", "dark"]).default("light"),
+    /** Hex colour for buttons and highlights, e.g. #F5C518. Empty = the built-in orange. */
+    brandColor: z.union([z.string().trim().regex(/^#[0-9a-fA-F]{6}$/, "Use a colour like #F5C518"), z.literal("")]).default(""),
+    heroTitle: optionalText(80),
+    heroSubtitle: optionalText(200),
+    announcement: optionalText(140),
+    instagramUrl: z.union([z.url("Enter a full link"), z.literal("")]).default(""),
+    facebookUrl: z.union([z.url("Enter a full link"), z.literal("")]).default(""),
+  }),
+
   notifications: z.object({
     emailCriticalAlerts: z.boolean().default(false),
     alertEmail: z.union([z.email("Enter a valid e-mail"), z.literal("")]).default(""),
@@ -356,6 +367,29 @@ export const SETTINGS_SECTIONS: SectionDef[] = [
       { name: "overtimeMultiplier", label: "Overtime pay multiplier (1 = normal hourly rate)", type: "text" },
       { name: "overtimeMinimumMinutes", label: "Count overtime only when it is at least (minutes)", type: "number" },
       { name: "standardShiftHours", label: "Standard shift length in hours (for staff without a shift)", type: "number" },
+    ],
+  },
+  {
+    slug: "website",
+    key: "website",
+    title: "Website",
+    description: "How the online ordering site looks: colours, the main headline, an announcement bar and social links.",
+    fields: [
+      {
+        name: "theme",
+        label: "Website style",
+        type: "select",
+        options: [
+          { value: "light", label: "Light" },
+          { value: "dark", label: "Dark" },
+        ],
+      },
+      { name: "brandColor", label: "Brand colour (hex, e.g. #F5C518; blank = default orange)", type: "text" },
+      { name: "heroTitle", label: "Main headline (blank = restaurant name)", type: "text" },
+      { name: "heroSubtitle", label: "Text under the headline (blank = tagline)", type: "textarea" },
+      { name: "announcement", label: "Announcement bar (blank = hidden)", type: "text" },
+      { name: "instagramUrl", label: "Instagram link", type: "url" },
+      { name: "facebookUrl", label: "Facebook link", type: "url" },
     ],
   },
   {

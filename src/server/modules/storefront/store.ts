@@ -27,16 +27,18 @@ export async function getPublicProfile() {
   cacheTag("settings");
   cacheLife("hours");
   const branchId = await getDefaultBranchId();
-  const [profile, hours, delivery, ordering, finance] = await Promise.all([
+  const [profile, hours, delivery, ordering, finance, website] = await Promise.all([
     getSetting("business.profile"),
     getBusinessHours(branchId),
     getSetting("delivery"),
     getSetting("ordering"),
     getSetting("finance"),
+    getSetting("website"),
   ]);
   const zones = await listZones(branchId, { activeOnly: true });
   return {
     profile,
+    website,
     hours,
     zones,
     delivery: { defaultCharge: delivery.defaultCharge, minimumOrder: delivery.minimumOrder, freeDeliveryAbove: delivery.freeDeliveryAbove, estimatedMinutes: delivery.estimatedMinutes },
